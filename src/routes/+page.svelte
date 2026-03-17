@@ -1,4 +1,17 @@
 <script lang="ts">
+let today = new Date().toLocaleDateString();
+
+function capitalize(text: string) {
+	return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function getWeatherEmoji(condition: string) {
+	if (condition.includes("rain")) return "🌧";
+	if (condition.includes("cloud")) return "☁";
+	if (condition.includes("clear")) return "☀";
+	if (condition.includes("snow")) return "❄";
+	return "🌤";
+}
 type WeatherData = {
 	name: string;
 	main: {
@@ -64,8 +77,8 @@ type WeatherData = {
  }}
  />
 
-<button onclick={getWeather}>
-	Get Weather
+<button onclick={getWeather} disabled={loading}>
+	{loading ? "Loading..." : "Get Weather"}
 </button>
 
 {#if loading}
@@ -87,8 +100,10 @@ type WeatherData = {
 			alt="weather icon"
 		/>
         {/if}
+        <p>📅 {today}</p>
+        <p>{getWeatherEmoji(weather.weather[0].description)}</p>
 		<p>🌡 Temperature: {weather.main.temp} °C</p>
-		<p>☁ Condition: {weather.weather[0].description}</p>
+		<p>☁ Condition: { capitalize(weather.weather[0].description) }</p>
 		<p>💧 Humidity: {weather.main.humidity}%</p>
 	</div>
 {/if}
