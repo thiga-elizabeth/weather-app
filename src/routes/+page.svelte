@@ -76,10 +76,13 @@ type WeatherData = {
     }
  }}
  />
-
-<button onclick={getWeather} disabled={loading}>
+<div class="search-box">
+	<input placeholder="Enter city" bind:value={city} />
+	<button onclick={getWeather} disabled={loading}>
 	{loading ? "Loading..." : "Get Weather"}
 </button>
+
+</div>
 
 {#if loading}
 	<p>Loading...</p>
@@ -123,6 +126,7 @@ type WeatherData = {
 
 	.container {
 		max-width: 400px;
+        width:90%;
 		margin: auto;
 		padding: 20px;
 		text-align: center;
@@ -165,7 +169,37 @@ type WeatherData = {
     .weather-icon {
 	width: 90px;
 	height: 90px;
+    max-width: 100%;
 	margin: 10px auto;
 	display: block;
+}
+.search-box {
+	display: flex;
+	gap: 10px;
+	justify-content: center;
+}
+@media (max-width: 500px) {
+
+	.search-box {
+		flex-direction: column;
+	}
+
+	input {
+		width: 100%;
+	}
+
+	button {
+		width: 100%;
+	}
+
+	.weather-card {
+		padding: 15px;
+	}
+    h1{
+        font-size: 24px;
+    }
+    p{
+        font-size: 14px;
+    }
 }
 </style>
