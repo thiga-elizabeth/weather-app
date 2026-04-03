@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+
 type WeatherData = {
 	name: string;
 	timezone: number; 
@@ -17,9 +18,62 @@ let city =$state('');
 let weather = $state<WeatherData | null>(null);
 let loading = $state(false);
 let error = $state('');
-
+let islocating = $state(false);
+let isLocationWeather = $state(false);
 let cityTime = $state('');
 let cityDate = $state('');
+
+async function getLocationWeather() {
+	isLocationWeather = true;
+	if (!navigator.geolocation) {
+		error = "Geolocation is not supported by your browser";
+		return;
+	}
+
+	try {
+		islocating = true;
+		error = '';
+		weather = null;
+
+navigator.geolocation.getCurrentPosition(
+	(position) => {
+		void (async () => {
+			const { latitude, longitude } = position.coords;
+
+			try {
+				const response = await fetch(
+					`/api/weather?lat=${latitude}&lon=${longitude}`
+				);
+
+				if (!response.ok) {
+					const errData = await response.json();
+                    throw new Error(errData.error || "City not found");
+
+				}
+
+				const data: WeatherData = await response.json();
+				weather = data;
+				cityTime = getCityTime(data.timezone);
+				cityDate = getCityDate(data.timezone);
+           		city = data.name;
+
+			} catch (err) {
+				error = err instanceof Error ? err.message : "An error occurred";
+			} finally {
+				islocating = false;
+			}
+		})();
+	},
+	() => {
+		error = "Unable to retrieve your location";
+		islocating = false;
+	}
+);
+	} catch (err) {
+		error = err instanceof Error ? err.message : "An error occurred";
+		islocating = false;
+	}
+}
 
 function getBackground(condition: string) {
 		const text = condition.toLowerCase();
@@ -31,14 +85,29 @@ function getBackground(condition: string) {
 
 		return 'linear-gradient(135deg, #74ebd5, #9face6)';
 	}
-const background = $derived(
-	weather && weather.weather?.length
-		? getBackground(weather.weather[0].description)
-		: 'linear-gradient(135deg, #74ebd5, #9face6)'
-);
-$effect(() => {
-	document.body.style.background = background;
+const background = $derived(() => {
+	const description = weather?.weather?.[0]?.description;
+	return description
+		? getBackground(description)
+		: 'linear-gradient(135deg, #74ebd5, #9face6)';
 });
+
+$effect(() => {
+	document.body.style.background = background();
+});
+
+$effect(() => {
+	if (!weather?.timezone) return;
+
+	const timezone = weather.timezone; //  capture safely
+
+	const interval = setInterval(() => {
+		cityTime = getCityTime(timezone);
+	}, 1000);
+
+	return () => clearInterval(interval);
+});
+
 
 function getCityTime(offset: number) {
 	const now = new Date();
@@ -56,6 +125,7 @@ function getCityDate(offset: number) {
 		const now = new Date();
 		const utc = now.getTime() + now.getTimezoneOffset() * 60000;
 		const cityDate = new Date(utc + offset * 1000);
+		
 
 		return cityDate.toLocaleDateString(undefined, {
 			weekday: 'long',
@@ -64,15 +134,10 @@ function getCityDate(offset: number) {
 			day: 'numeric'
 		});
 	}
+let inputRef: HTMLInputElement;
 
 onMount(() => {
-	const interval = setInterval(() => {
-		if (weather) {
-			cityTime = getCityTime(weather.timezone);
-		}
-	}, 1000);
-
-	return () => clearInterval(interval);
+	inputRef?.focus();
 });
 
 function capitalize(text: string) {
@@ -80,6 +145,7 @@ function capitalize(text: string) {
 	}
 
 	async function getWeather() {
+		isLocationWeather = false;
         if (!city.trim()) {
             error = "Please enter a city";
             
@@ -90,16 +156,12 @@ function capitalize(text: string) {
 			error = '';
             weather = null;
 
-			const apiKey = "6139232b6007e30d97e4b41878c84085";
-
-			const url =
-				`https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${apiKey}`;
-
-			const response = await fetch(url);
+			const response = await fetch(`/api/weather?city=${encodeURIComponent(city.trim())}`);
 
 			if (!response.ok) {
-				throw new Error("City not found");
-			}
+	           const errData = await response.json();
+               throw new Error(errData.error || "City not found");
+             			 }
 
 			const data: WeatherData = await response.json();
 			weather = data;
@@ -122,17 +184,31 @@ function capitalize(text: string) {
 
 <div class="search-box">
 	<input
+	    bind:this={inputRef}
 		placeholder="Enter city"
 		bind:value={city}
+		oninput={() => (error = '')}
 		onkeydown={(e) => {
-			if (e.key === 'Enter') getWeather();
+			if (e.key === 'Enter' && !loading && !islocating) getWeather();
 		}}
 	/>
 
-	<button onclick={getWeather} disabled={loading}>
+	
+</div>
+
+<div class="actions">
+    <button onclick={getWeather} disabled={loading || islocating || !city.trim()}>
 		{loading ? "Loading..." : "Get Weather"}
 	</button>
+	<button onclick={getLocationWeather} disabled={loading ||islocating}>
+	{islocating ? "Getting location..." : "📍 Use My Location"}
+ </button>
+
 </div>
+
+{#if islocating} 
+	<p class="status">Getting your location...</p>
+{/if}
 
 {#if loading}
 	<p class="status">Loading...</p>
@@ -142,30 +218,42 @@ function capitalize(text: string) {
 	<p class="error">{error}</p>
 {/if}
 
+ {#if !weather && !loading && !islocating && !error}
+	<p>Search for a city or use your location 🌍</p>
+ {/if}
+
+
 {#if weather }
 	<div class="weather-card">
-		<h2>{capitalize(weather.name)}</h2>
+		<h2>
+			{capitalize(weather.name)}
+	        {#if isLocationWeather}(Your Location){/if}
+		</h2>
 
-        {#if weather.weather[0].icon}
 	<img
 		class="weather-icon"
-		src={`https://openweathermap.org/img/wn/${weather.weather[0].icon}@2x.png`}
-		alt={weather.weather[0].description}
+		src={`https://openweathermap.org/img/wn/${weather.weather?.[0].icon}@2x.png`}
+		alt={weather.weather?.[0].description}
 		onerror={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
 	/>
-{/if}
 		{#if cityTime}
 		<p class="time">⏰ {cityTime}</p>
-{/if}
-{#if cityDate}
+ {/if}
+ {#if cityDate}
 				<p class="date">📅 {cityDate}</p>
-{/if}
-		
+ {/if}
+
+
+ {#if weather}
 		<div class="weather-info">
 				<p>🌡 {weather.main.temp}°C</p>
-				<p>☁ {capitalize(weather.weather[0].description)}</p>
+				<p>☁ {weather.weather?.[0]?.description 
+	                   ? capitalize(weather.weather[0].description) 
+	                   : ''}
+                </p>
 				<p>💧 {weather.main.humidity}%</p>
 			</div>
+ {/if}
 	</div>
 {/if}
 
@@ -272,6 +360,12 @@ function capitalize(text: string) {
 }
 .weather-card {
 	animation: fadeIn 0.4s ease;
+}
+
+.actions {
+	display: flex;
+	gap: 10px;
+	margin-top: 10px;
 }
 
 @keyframes fadeIn {
