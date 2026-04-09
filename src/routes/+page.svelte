@@ -14,17 +14,50 @@ type WeatherData = {
 	}[];
 };
 
+type ForecastItem = {
+	dt: number;
+	main: {
+		temp: number;
+	};
+	weather: {
+		description: string;
+		icon: string;
+	}[];
+};
+
+type ForecastData = {
+	list: ForecastItem[];
+};
+
 let city =$state('');
 let weather = $state<WeatherData | null>(null);
+let forecastData = $state<ForecastData | null>(null);
 let loading = $state(false);
 let error = $state('');
 let islocating = $state(false);
 let isLocationWeather = $state(false);
 let cityTime = $state('');
 let cityDate = $state('');
+let savedCities = $state<{ name: string; favorite: boolean }[]>([]);
+
+const dailyForecast = $derived(() => {
+	if (!forecastData?.list) return [];
+
+	const days: string[] = [];
+
+	return forecastData.list.filter(item => {
+		const date = new Date(item.dt * 1000).toDateString();
+
+		if (days.includes(date)) return false;
+
+		days.push(date);
+		return true;
+	});
+});
 
 async function getLocationWeather() {
 	isLocationWeather = true;
+
 	if (!navigator.geolocation) {
 		error = "Geolocation is not supported by your browser";
 		return;
@@ -41,9 +74,20 @@ navigator.geolocation.getCurrentPosition(
 			const { latitude, longitude } = position.coords;
 
 			try {
+				const forecastRes = await fetch(
+					`/api/weather?lat=${latitude}&lon=${longitude}&forecast=true`
+				);
+
+				if (forecastRes.ok) {
+					forecastData = await forecastRes.json();
+				} else {
+					forecastData = null;
+				}
+
 				const response = await fetch(
 					`/api/weather?lat=${latitude}&lon=${longitude}`
 				);
+
 
 				if (!response.ok) {
 					const errData = await response.json();
@@ -53,6 +97,13 @@ navigator.geolocation.getCurrentPosition(
 
 				const data: WeatherData = await response.json();
 				weather = data;
+				city = data.name;
+
+                if (!savedCities.find(c => c.name === data.name)) {
+					if (savedCities.length >= 5) return;
+	              savedCities = [...savedCities, { name: data.name, favorite: false }];
+                }
+
 				cityTime = getCityTime(data.timezone);
 				cityDate = getCityDate(data.timezone);
            		city = data.name;
@@ -96,10 +147,16 @@ $effect(() => {
 	document.body.style.background = background();
 });
 
+// Save cities only when they change
+$effect(() => {
+	localStorage.setItem("cities", JSON.stringify(savedCities));
+});
+
+// Handle time updates separately
 $effect(() => {
 	if (!weather?.timezone) return;
 
-	const timezone = weather.timezone; //  capture safely
+	const timezone = weather.timezone;
 
 	const interval = setInterval(() => {
 		cityTime = getCityTime(timezone);
@@ -107,7 +164,6 @@ $effect(() => {
 
 	return () => clearInterval(interval);
 });
-
 
 function getCityTime(offset: number) {
 	const now = new Date();
@@ -136,8 +192,23 @@ function getCityDate(offset: number) {
 	}
 let inputRef: HTMLInputElement;
 
+function toggleFavorite(cityName: string) {
+	savedCities = savedCities.map(c =>
+		c.name === cityName ? { ...c, favorite: !c.favorite } : c
+	);
+}
+
+function removeCity(cityName: string) {
+	savedCities = savedCities.filter(c => c.name !== cityName);
+}
+
 onMount(() => {
 	inputRef?.focus();
+
+	const stored = localStorage.getItem("cities");
+	if (stored) {
+		savedCities = JSON.parse(stored);
+	}
 });
 
 function capitalize(text: string) {
@@ -145,36 +216,54 @@ function capitalize(text: string) {
 	}
 
 	async function getWeather() {
-		isLocationWeather = false;
-        if (!city.trim()) {
-            error = "Please enter a city";
-            
-            return;
-        }
-		try {
-			loading = true;
-			error = '';
-            weather = null;
+	isLocationWeather = false;
 
-			const response = await fetch(`/api/weather?city=${encodeURIComponent(city.trim())}`);
-
-			if (!response.ok) {
-	           const errData = await response.json();
-               throw new Error(errData.error || "City not found");
-             			 }
-
-			const data: WeatherData = await response.json();
-			weather = data;
-
-			cityTime = getCityTime(data.timezone);
-			cityDate = getCityDate(data.timezone);
-				
-		} catch (err) {
-			error = err instanceof Error ? err.message : "An error occurred";
-		} finally {
-			loading = false;
-		}
+	if (!city.trim()) {
+		error = "Please enter a city";
+		return;
 	}
+
+	try {
+		loading = true;
+		error = '';
+		weather = null;
+		forecastData = null;
+
+		// forecast
+		const forecastRes = await fetch(
+			`/api/weather?city=${encodeURIComponent(city.trim())}&forecast=true`
+		);
+
+		if (forecastRes.ok) {
+			forecastData = await forecastRes.json();
+		}
+
+		// current weather
+		const response = await fetch(
+			`/api/weather?city=${encodeURIComponent(city.trim())}`
+		);
+
+		if (!response.ok) {
+			const errData = await response.json();
+			throw new Error(errData.error || "City not found");
+		}
+
+		const data: WeatherData = await response.json();
+		weather = data;
+
+		if (!savedCities.find(c => c.name === data.name)) {
+	      savedCities = [...savedCities, { name: data.name, favorite: false }];
+       }
+
+		cityTime = getCityTime(data.timezone);
+		cityDate = getCityDate(data.timezone);
+
+	} catch (err) {
+		error = err instanceof Error ? err.message : "An error occurred";
+	} finally {
+		loading = false;
+	}
+}
 </script>
 
 <div class="container">
@@ -206,6 +295,34 @@ function capitalize(text: string) {
 
 </div>
 
+{#if savedCities.length ===0}
+     <p class="status">No saved cities.</p>
+<div class="saved-cities">
+	<h3>Saved Cities</h3>
+
+	{#each [...savedCities].sort((a,b)=>Number(b.favorite) - Number(a.favorite)) as c (c.name)}
+		<div class="city-item {c.favorite ? 'favorite' : ''}">
+			<button class="city-name" onclick={() => {
+	           city = c.name;
+	           getWeather();
+            }}>
+	           {c.name}
+            </button>
+
+			<div class="city-actions">
+				<button onclick={() => toggleFavorite(c.name)}>
+					{c.favorite ? "⭐" : "☆"}
+				</button>
+
+				<button onclick={() => removeCity(c.name)}>
+					❌
+				</button>
+			</div>
+		</div>
+	{/each}
+</div>
+{/if}
+
 {#if islocating} 
 	<p class="status">Getting your location...</p>
 {/if}
@@ -230,6 +347,27 @@ function capitalize(text: string) {
 	        {#if isLocationWeather}(Your Location){/if}
 		</h2>
 
+		{#if forecastData?.list}
+	      <div class="forecast">
+		      {#each dailyForecast().slice(0, 5) as item, i (item.dt)}
+			     <div class="forecast-item {i === 0 ? 'active':''} ">
+				  <p>
+	                {new Date(item.dt * 1000).toLocaleDateString(undefined, {
+		              weekday: 'short',
+					  day: 'numeric',
+					  month: 'short'
+	                })}
+                 </p> 
+				 <img
+                   src={`https://openweathermap.org/img/wn/${item.weather[0].icon}.png`}
+                   alt="weather icon"
+                 />
+				   <p>{item.main.temp}°C</p>
+			</div>
+		{/each}
+	</div>
+{/if}
+
 	<img
 		class="weather-icon"
 		src={`https://openweathermap.org/img/wn/${weather.weather?.[0].icon}@2x.png`}
@@ -244,7 +382,7 @@ function capitalize(text: string) {
  {/if}
 
 
- {#if weather}
+ 
 		<div class="weather-info">
 				<p>🌡 {weather.main.temp}°C</p>
 				<p>☁ {weather.weather?.[0]?.description 
@@ -253,7 +391,7 @@ function capitalize(text: string) {
                 </p>
 				<p>💧 {weather.main.humidity}%</p>
 			</div>
- {/if}
+ 
 	</div>
 {/if}
 
@@ -269,12 +407,53 @@ function capitalize(text: string) {
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	background: linear-gradient(135deg, #74ebd5, #9face6);
 }
 .container{
 	width:90%;
 	max-width:400px;
 	text-align:center;
 }
+
+.forecast {
+	display: flex;
+	gap: 10px;
+	margin-top: 15px;
+	overflow-x: auto;
+	scroll-behavior: smooth;
+}
+
+.forecast-item {
+	background: rgba(255,255,255,0.3);
+	padding: 12px;
+	border-radius: 10px;
+	min-width: 80px;
+}
+
+.forecast-item:hover {
+	transform: translateY(-3px);
+	transition: 0.2s ease;
+}
+
+.forecast-item img {
+	width: 45px;
+	height: 45px;
+	margin: 5px 0;
+}
+
+.forecast {
+	scrollbar-width: none;
+}
+
+.forecast::-webkit-scrollbar {
+	display: none;
+}
+
+.active {
+	background: rgba(255,255,255,0.6);
+	transform: scale(1.05);
+}
+
   h1 {
 		margin-bottom: 20px;
 	}
@@ -305,6 +484,7 @@ function capitalize(text: string) {
 	}
 	button:hover{
 		background-color:#3793d6;
+		transform:scale(1.05);
 	}
 	button:disabled{
 		background-color:#a0c4e8;
@@ -325,7 +505,7 @@ function capitalize(text: string) {
 		background: rgba(255, 255, 255, 0.35);
 		backdrop-filter: blur(10px);
 
-		box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+		box-shadow: 0 8px 25px rgba(0,0,0,0.4);
 		transition: transform 0.2s ease;
 	}
 	.weather-card:hover{
@@ -366,6 +546,63 @@ function capitalize(text: string) {
 	display: flex;
 	gap: 10px;
 	margin-top: 10px;
+}
+
+.saved-cities {
+	margin-top: 15px;
+	text-align: left;
+}
+
+.saved-cities h3 {
+	margin-bottom: 10px;
+	font-size: 16px;
+	font-weight: 600;
+	color: #222;
+}
+
+.city-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 8px;
+	border-radius: 8px;
+	background: rgba(255,255,255,0.25);
+	margin-bottom: 6px;
+}
+
+.city-actions button {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: 16px;
+	margin-left: 5px;
+}
+
+.city-name {
+	background: none;
+	border: none;
+	padding: 0;
+	font: inherit;
+	cursor: pointer;
+	color: inherit;
+	text-align: left;
+}
+
+.city-name:hover {
+	text-decoration: underline;
+}
+
+.city-item.favorite {
+	background: rgba(255, 255, 255, 0.4);
+	border: 1px solid rgba(255, 215, 0, 0.5);
+}
+
+.city-item:active {
+	transform: scale(0.97);
+}
+
+.city-actions button:hover {
+	transform: scale(1.2);
 }
 
 @keyframes fadeIn {

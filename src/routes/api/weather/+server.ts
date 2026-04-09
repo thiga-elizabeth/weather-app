@@ -5,21 +5,31 @@ export async function GET({ url }) {
 	const city = url.searchParams.get('city');
 	const lat = url.searchParams.get('lat');
 	const lon = url.searchParams.get('lon');
+	const forecast = url.searchParams.get('forecast');
 
 	const apiKey = PRIVATE_WEATHER_API_KEY;
 
 	let apiUrl = '';
 
-	// City search
+	// 🌆 CITY REQUESTS
 	if (city) {
-		apiUrl = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
+		if (forecast) {
+			apiUrl = `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
+		} else {
+			apiUrl = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
+		}
 	}
 
-	// Location search
+	// 📍 LOCATION REQUESTS
 	else if (lat && lon) {
-		apiUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
+		if (forecast) {
+			apiUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
+		} else {
+			apiUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
+		}
 	}
 
+	// ❌ INVALID REQUEST
 	else {
 		return json({ error: 'City or coordinates required' }, { status: 400 });
 	}
