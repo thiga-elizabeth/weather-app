@@ -38,6 +38,7 @@ let islocating = $state(false);
 let isLocationWeather = $state(false);
 let cityTime = $state('');
 let cityDate = $state('');
+let savedCities = $state<{ name: string; favorite: boolean }[]>([]);
 
 const dailyForecast = $derived(() => {
 	if (!forecastData?.list) return [];
@@ -96,6 +97,12 @@ navigator.geolocation.getCurrentPosition(
 
 				const data: WeatherData = await response.json();
 				weather = data;
+				city = data.name;
+
+                if (!savedCities.find(c => c.name === data.name)) {
+					if (savedCities.length >= 5) return;
+	              savedCities = [...savedCities, { name: data.name, favorite: false }];
+                }
 
 				cityTime = getCityTime(data.timezone);
 				cityDate = getCityDate(data.timezone);
@@ -140,10 +147,16 @@ $effect(() => {
 	document.body.style.background = background();
 });
 
+// Save cities only when they change
+$effect(() => {
+	localStorage.setItem("cities", JSON.stringify(savedCities));
+});
+
+// Handle time updates separately
 $effect(() => {
 	if (!weather?.timezone) return;
 
-	const timezone = weather.timezone; //  capture safely
+	const timezone = weather.timezone;
 
 	const interval = setInterval(() => {
 		cityTime = getCityTime(timezone);
@@ -151,7 +164,6 @@ $effect(() => {
 
 	return () => clearInterval(interval);
 });
-
 
 function getCityTime(offset: number) {
 	const now = new Date();
@@ -180,8 +192,23 @@ function getCityDate(offset: number) {
 	}
 let inputRef: HTMLInputElement;
 
+function toggleFavorite(cityName: string) {
+	savedCities = savedCities.map(c =>
+		c.name === cityName ? { ...c, favorite: !c.favorite } : c
+	);
+}
+
+function removeCity(cityName: string) {
+	savedCities = savedCities.filter(c => c.name !== cityName);
+}
+
 onMount(() => {
 	inputRef?.focus();
+
+	const stored = localStorage.getItem("cities");
+	if (stored) {
+		savedCities = JSON.parse(stored);
+	}
 });
 
 function capitalize(text: string) {
@@ -224,6 +251,10 @@ function capitalize(text: string) {
 		const data: WeatherData = await response.json();
 		weather = data;
 
+		if (!savedCities.find(c => c.name === data.name)) {
+	      savedCities = [...savedCities, { name: data.name, favorite: false }];
+       }
+
 		cityTime = getCityTime(data.timezone);
 		cityDate = getCityDate(data.timezone);
 
@@ -263,6 +294,34 @@ function capitalize(text: string) {
  </button>
 
 </div>
+
+{#if savedCities.length ===0}
+     <p class="status">No saved cities.</p>
+<div class="saved-cities">
+	<h3>Saved Cities</h3>
+
+	{#each [...savedCities].sort((a,b)=>Number(b.favorite) - Number(a.favorite)) as c (c.name)}
+		<div class="city-item {c.favorite ? 'favorite' : ''}">
+			<button class="city-name" onclick={() => {
+	           city = c.name;
+	           getWeather();
+            }}>
+	           {c.name}
+            </button>
+
+			<div class="city-actions">
+				<button onclick={() => toggleFavorite(c.name)}>
+					{c.favorite ? "⭐" : "☆"}
+				</button>
+
+				<button onclick={() => removeCity(c.name)}>
+					❌
+				</button>
+			</div>
+		</div>
+	{/each}
+</div>
+{/if}
 
 {#if islocating} 
 	<p class="status">Getting your location...</p>
@@ -361,6 +420,7 @@ function capitalize(text: string) {
 	gap: 10px;
 	margin-top: 15px;
 	overflow-x: auto;
+	scroll-behavior: smooth;
 }
 
 .forecast-item {
@@ -368,6 +428,11 @@ function capitalize(text: string) {
 	padding: 12px;
 	border-radius: 10px;
 	min-width: 80px;
+}
+
+.forecast-item:hover {
+	transform: translateY(-3px);
+	transition: 0.2s ease;
 }
 
 .forecast-item img {
@@ -419,6 +484,7 @@ function capitalize(text: string) {
 	}
 	button:hover{
 		background-color:#3793d6;
+		transform:scale(1.05);
 	}
 	button:disabled{
 		background-color:#a0c4e8;
@@ -439,7 +505,7 @@ function capitalize(text: string) {
 		background: rgba(255, 255, 255, 0.35);
 		backdrop-filter: blur(10px);
 
-		box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+		box-shadow: 0 8px 25px rgba(0,0,0,0.4);
 		transition: transform 0.2s ease;
 	}
 	.weather-card:hover{
@@ -480,6 +546,63 @@ function capitalize(text: string) {
 	display: flex;
 	gap: 10px;
 	margin-top: 10px;
+}
+
+.saved-cities {
+	margin-top: 15px;
+	text-align: left;
+}
+
+.saved-cities h3 {
+	margin-bottom: 10px;
+	font-size: 16px;
+	font-weight: 600;
+	color: #222;
+}
+
+.city-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 8px;
+	border-radius: 8px;
+	background: rgba(255,255,255,0.25);
+	margin-bottom: 6px;
+}
+
+.city-actions button {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: 16px;
+	margin-left: 5px;
+}
+
+.city-name {
+	background: none;
+	border: none;
+	padding: 0;
+	font: inherit;
+	cursor: pointer;
+	color: inherit;
+	text-align: left;
+}
+
+.city-name:hover {
+	text-decoration: underline;
+}
+
+.city-item.favorite {
+	background: rgba(255, 255, 255, 0.4);
+	border: 1px solid rgba(255, 215, 0, 0.5);
+}
+
+.city-item:active {
+	transform: scale(0.97);
+}
+
+.city-actions button:hover {
+	transform: scale(1.2);
 }
 
 @keyframes fadeIn {
