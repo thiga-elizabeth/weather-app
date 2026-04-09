@@ -14,8 +14,24 @@ type WeatherData = {
 	}[];
 };
 
+type ForecastItem = {
+	dt: number;
+	main: {
+		temp: number;
+	};
+	weather: {
+		description: string;
+		icon: string;
+	}[];
+};
+
+type ForecastData = {
+	list: ForecastItem[];
+};
+
 let city =$state('');
 let weather = $state<WeatherData | null>(null);
+let forecastData = $state<ForecastData | null>(null);
 let loading = $state(false);
 let error = $state('');
 let islocating = $state(false);
@@ -23,8 +39,24 @@ let isLocationWeather = $state(false);
 let cityTime = $state('');
 let cityDate = $state('');
 
+const dailyForecast = $derived(() => {
+	if (!forecastData?.list) return [];
+
+	const days: string[] = [];
+
+	return forecastData.list.filter(item => {
+		const date = new Date(item.dt * 1000).toDateString();
+
+		if (days.includes(date)) return false;
+
+		days.push(date);
+		return true;
+	});
+});
+
 async function getLocationWeather() {
 	isLocationWeather = true;
+
 	if (!navigator.geolocation) {
 		error = "Geolocation is not supported by your browser";
 		return;
@@ -41,9 +73,20 @@ navigator.geolocation.getCurrentPosition(
 			const { latitude, longitude } = position.coords;
 
 			try {
+				const forecastRes = await fetch(
+					`/api/weather?lat=${latitude}&lon=${longitude}&forecast=true`
+				);
+
+				if (forecastRes.ok) {
+					forecastData = await forecastRes.json();
+				} else {
+					forecastData = null;
+				}
+
 				const response = await fetch(
 					`/api/weather?lat=${latitude}&lon=${longitude}`
 				);
+
 
 				if (!response.ok) {
 					const errData = await response.json();
@@ -53,6 +96,7 @@ navigator.geolocation.getCurrentPosition(
 
 				const data: WeatherData = await response.json();
 				weather = data;
+
 				cityTime = getCityTime(data.timezone);
 				cityDate = getCityDate(data.timezone);
            		city = data.name;
@@ -145,36 +189,50 @@ function capitalize(text: string) {
 	}
 
 	async function getWeather() {
-		isLocationWeather = false;
-        if (!city.trim()) {
-            error = "Please enter a city";
-            
-            return;
-        }
-		try {
-			loading = true;
-			error = '';
-            weather = null;
+	isLocationWeather = false;
 
-			const response = await fetch(`/api/weather?city=${encodeURIComponent(city.trim())}`);
-
-			if (!response.ok) {
-	           const errData = await response.json();
-               throw new Error(errData.error || "City not found");
-             			 }
-
-			const data: WeatherData = await response.json();
-			weather = data;
-
-			cityTime = getCityTime(data.timezone);
-			cityDate = getCityDate(data.timezone);
-				
-		} catch (err) {
-			error = err instanceof Error ? err.message : "An error occurred";
-		} finally {
-			loading = false;
-		}
+	if (!city.trim()) {
+		error = "Please enter a city";
+		return;
 	}
+
+	try {
+		loading = true;
+		error = '';
+		weather = null;
+		forecastData = null;
+
+		// forecast
+		const forecastRes = await fetch(
+			`/api/weather?city=${encodeURIComponent(city.trim())}&forecast=true`
+		);
+
+		if (forecastRes.ok) {
+			forecastData = await forecastRes.json();
+		}
+
+		// current weather
+		const response = await fetch(
+			`/api/weather?city=${encodeURIComponent(city.trim())}`
+		);
+
+		if (!response.ok) {
+			const errData = await response.json();
+			throw new Error(errData.error || "City not found");
+		}
+
+		const data: WeatherData = await response.json();
+		weather = data;
+
+		cityTime = getCityTime(data.timezone);
+		cityDate = getCityDate(data.timezone);
+
+	} catch (err) {
+		error = err instanceof Error ? err.message : "An error occurred";
+	} finally {
+		loading = false;
+	}
+}
 </script>
 
 <div class="container">
@@ -230,6 +288,27 @@ function capitalize(text: string) {
 	        {#if isLocationWeather}(Your Location){/if}
 		</h2>
 
+		{#if forecastData?.list}
+	      <div class="forecast">
+		      {#each dailyForecast().slice(0, 5) as item, i (item.dt)}
+			     <div class="forecast-item {i === 0 ? 'active':''} ">
+				  <p>
+	                {new Date(item.dt * 1000).toLocaleDateString(undefined, {
+		              weekday: 'short',
+					  day: 'numeric',
+					  month: 'short'
+	                })}
+                 </p> 
+				 <img
+                   src={`https://openweathermap.org/img/wn/${item.weather[0].icon}.png`}
+                   alt="weather icon"
+                 />
+				   <p>{item.main.temp}°C</p>
+			</div>
+		{/each}
+	</div>
+{/if}
+
 	<img
 		class="weather-icon"
 		src={`https://openweathermap.org/img/wn/${weather.weather?.[0].icon}@2x.png`}
@@ -244,7 +323,7 @@ function capitalize(text: string) {
  {/if}
 
 
- {#if weather}
+ 
 		<div class="weather-info">
 				<p>🌡 {weather.main.temp}°C</p>
 				<p>☁ {weather.weather?.[0]?.description 
@@ -253,7 +332,7 @@ function capitalize(text: string) {
                 </p>
 				<p>💧 {weather.main.humidity}%</p>
 			</div>
- {/if}
+ 
 	</div>
 {/if}
 
@@ -269,12 +348,47 @@ function capitalize(text: string) {
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	background: linear-gradient(135deg, #74ebd5, #9face6);
 }
 .container{
 	width:90%;
 	max-width:400px;
 	text-align:center;
 }
+
+.forecast {
+	display: flex;
+	gap: 10px;
+	margin-top: 15px;
+	overflow-x: auto;
+}
+
+.forecast-item {
+	background: rgba(255,255,255,0.3);
+	padding: 12px;
+	border-radius: 10px;
+	min-width: 80px;
+}
+
+.forecast-item img {
+	width: 45px;
+	height: 45px;
+	margin: 5px 0;
+}
+
+.forecast {
+	scrollbar-width: none;
+}
+
+.forecast::-webkit-scrollbar {
+	display: none;
+}
+
+.active {
+	background: rgba(255,255,255,0.6);
+	transform: scale(1.05);
+}
+
   h1 {
 		margin-bottom: 20px;
 	}
